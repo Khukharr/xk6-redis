@@ -2,9 +2,16 @@
 package redis
 
 import (
+	"crypto/sha1"
+	"encoding/base64"
 	"errors"
+	"slices"
+	"strings"
+	"sync"
 
 	"github.com/grafana/sobek"
+	"github.com/redis/go-redis/v9"
+
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
@@ -12,11 +19,15 @@ import (
 type (
 	// RootModule is the global module instance that will create Client
 	// instances for each VU.
-	RootModule struct{}
+	RootModule struct {
+		cm map[string]redis.UniversalClient
+		mu *sync.RWMutex
+	}
 
 	// ModuleInstance represents an instance of the JS module.
 	ModuleInstance struct {
 		vu modules.VU
+		f  GetRedisClientFunc
 
 		*Client
 	}
@@ -30,13 +41,48 @@ var (
 
 // New returns a pointer to a new RootModule instance
 func New() *RootModule {
-	return &RootModule{}
+	return &RootModule{
+		cm: make(map[string]redis.UniversalClient, 4),
+		mu: &sync.RWMutex{},
+	}
+}
+
+type GetRedisClientFunc func(*redis.UniversalOptions, DialContextFunc) redis.UniversalClient
+
+func optsToHash(opts *redis.UniversalOptions) string {
+	slices.Sort(opts.Addrs)
+	sum := sha1.Sum([]byte(strings.Join(opts.Addrs, ",")))
+	return base64.RawStdEncoding.EncodeToString(sum[:])
+}
+
+func (r *RootModule) GetRedisClient(opts *redis.UniversalOptions, dialContext DialContextFunc) redis.UniversalClient {
+	hash := optsToHash(opts)
+
+	r.mu.RLock()
+	client, found := r.cm[hash]
+	r.mu.RUnlock()
+
+	if found {
+		return client
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	client, found = r.cm[hash]
+	if found {
+		return client
+	}
+
+	opts.Dialer = dialContext
+	r.cm[hash] = redis.NewUniversalClient(opts)
+	return r.cm[hash]
 }
 
 // NewModuleInstance implements the modules.Module interface and returns
 // a new instance for each VU.
-func (*RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
-	return &ModuleInstance{vu: vu, Client: &Client{vu: vu}}
+func (r *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
+	return &ModuleInstance{vu: vu, f: r.GetRedisClient, Client: &Client{vu: vu}}
 }
 
 // Exports implements the modules.Instance interface and returns
@@ -81,7 +127,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	client := &Client{
 		vu:           mi.vu,
 		redisOptions: opts,
-		redisClient:  nil,
+		redisClient:  mi.f(opts, mi.vu.State().Dialer.DialContext),
 	}
 
 	return rt.ToValue(client).ToObject(rt)
