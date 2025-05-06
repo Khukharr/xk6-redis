@@ -26,8 +26,8 @@ type (
 
 	// ModuleInstance represents an instance of the JS module.
 	ModuleInstance struct {
-		vu modules.VU
-		f  GetRedisClientFunc
+		vu                 modules.VU
+		getRedisClientFunc GetRedisClientFunc
 
 		*Client
 	}
@@ -81,7 +81,7 @@ func (r *RootModule) GetRedisClient(opts *redis.UniversalOptions) redis.Universa
 // NewModuleInstance implements the modules.Module interface and returns
 // a new instance for each VU.
 func (r *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
-	return &ModuleInstance{vu: vu, f: r.GetRedisClient, Client: &Client{vu: vu}}
+	return &ModuleInstance{vu: vu, getRedisClientFunc: r.GetRedisClient, Client: &Client{vu: vu}}
 }
 
 // Exports implements the modules.Instance interface and returns
@@ -126,7 +126,7 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	client := &Client{
 		vu:             mi.vu,
 		redisOptions:   opts,
-		getRedisClient: mi.getRedisClient,
+		getRedisClient: mi.getRedisClientFunc,
 	}
 
 	return rt.ToValue(client).ToObject(rt)
