@@ -18,9 +18,10 @@ import (
 // Client represents the Client constructor (i.e. `new redis.Client()`) and
 // returns a new Redis client object.
 type Client struct {
-	vu           modules.VU
-	redisOptions *redis.UniversalOptions
-	redisClient  redis.UniversalClient
+	vu             modules.VU
+	redisOptions   *redis.UniversalOptions
+	redisClient    redis.UniversalClient
+	getRedisClient GetRedisClientFunc
 }
 
 // Set the given key with the given value.
@@ -1094,7 +1095,7 @@ func (c *Client) connect() error {
 
 	// Replace the internal redis client instance with a new
 	// one using our custom options.
-	c.redisClient = redis.NewUniversalClient(c.redisOptions)
+	c.redisClient = c.getRedisClient(c.redisOptions)
 
 	return nil
 }

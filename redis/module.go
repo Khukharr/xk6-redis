@@ -47,7 +47,7 @@ func New() *RootModule {
 	}
 }
 
-type GetRedisClientFunc func(*redis.UniversalOptions, DialContextFunc) redis.UniversalClient
+type GetRedisClientFunc func(*redis.UniversalOptions) redis.UniversalClient
 
 func optsToHash(opts *redis.UniversalOptions) string {
 	slices.Sort(opts.Addrs)
@@ -55,7 +55,7 @@ func optsToHash(opts *redis.UniversalOptions) string {
 	return base64.RawStdEncoding.EncodeToString(sum[:])
 }
 
-func (r *RootModule) GetRedisClient(opts *redis.UniversalOptions, dialContext DialContextFunc) redis.UniversalClient {
+func (r *RootModule) GetRedisClient(opts *redis.UniversalOptions) redis.UniversalClient {
 	hash := optsToHash(opts)
 
 	r.mu.RLock()
@@ -74,7 +74,6 @@ func (r *RootModule) GetRedisClient(opts *redis.UniversalOptions, dialContext Di
 		return client
 	}
 
-	opts.Dialer = dialContext
 	r.cm[hash] = redis.NewUniversalClient(opts)
 	return r.cm[hash]
 }
@@ -125,9 +124,9 @@ func (mi *ModuleInstance) NewClient(call sobek.ConstructorCall) *sobek.Object {
 	}
 
 	client := &Client{
-		vu:           mi.vu,
-		redisOptions: opts,
-		redisClient:  mi.f(opts, mi.vu.State().Dialer.DialContext),
+		vu:             mi.vu,
+		redisOptions:   opts,
+		getRedisClient: mi.getRedisClient,
 	}
 
 	return rt.ToValue(client).ToObject(rt)
